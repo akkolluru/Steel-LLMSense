@@ -49,6 +49,52 @@ def summarize_all_days(df):
         all_summaries[str(date)] = summary
     return all_summaries
 
+
+import requests
+def build_prompt(summary):
+    objective = (
+        "You are an expert industrial process analyst. "
+        "Your task is to analyze steel plant daily sensor summaries to detect anomalies, "
+        "predict potential maintenance needs, and suggest energy optimization."
+    )
+    context = (
+        "The steel plant data includes:\n"
+        "- Usage_kWh: Energy usage\n"
+        "- Lagging_Current_Reactive.Power_kVarh: Reactive power\n"
+        "- Leading_Current_Reactive_Power_kVarh: Reactive power\n"
+        "- CO2(tCO2): Emissions\n"
+        "- Power Factors: Operational efficiency\n"
+        "- Load Type distribution: Indicates operational states\n"
+        "Analyze based on your domain knowledge."
+    )
+    format_instructions = (
+        "Reply strictly in the following JSON format:\n"
+        "{\n"
+        "  \"maintenance_needed\": \"Yes/No\",\n"
+        "  \"reasoning\": \"Your concise reasoning here.\",\n"
+        "  \"energy_optimization_suggestions\": \"Your suggestions here.\"\n"
+        "}"
+    )
+    prompt = (
+        f"OBJECTIVE:\n{objective}\n\n"
+        f"CONTEXT:\n{context}\n\n"
+        f"DATA:\n{summary}\n\n"
+        f"FORMAT:\n{format_instructions}"
+    )
+    return prompt
+
+def send_to_ollama(prompt):
+    url="http://localhost:11434/api/generate"
+    response = requests.post(
+        url,
+        json={"model": "mistral", "prompt": prompt, "stream": False}
+    )
+    if response.status_code != 200:
+        print("Error communicating with Ollama:", response.text)
+        return None
+    return response.json()['response']
+
+
 if __name__ == "__main__":
     df = load_steel_data()
 
@@ -60,9 +106,20 @@ if __name__ == "__main__":
     if choice == '1':
         summaries = summarize_all_days(df)
         for date, summary in summaries.items():
-            print(f"\n{summary}")
-            print("-" * 40)
+            print(f"\n{date} Summary:\n{summary}")
+            prompt = build_prompt(summary)
+            response = send_to_ollama(prompt)
+            if response:
+                print(f"Ollama Response for {date}:\n{response}")
+            print("-"* 40)
     elif choice == '2':
         date = input("Enter the date (YYYY-MM-DD): ")
         summary = summarize_day(df, date)
         print(summary)
+        prompt = build_prompt(summary)
+        response = send_to_ollama(prompt)
+        if response:
+            print(f"Ollama Response for {date}:\n{response}")
+        
+    else:
+        print("Invalid choice. Please enter 1 or 2.")
