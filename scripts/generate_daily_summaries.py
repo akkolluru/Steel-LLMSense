@@ -1,4 +1,6 @@
 import pandas as pd
+import json
+import os
 
 def load_steel_data(path="data/Steel_industry_data.csv"):
     
@@ -118,6 +120,16 @@ def send_to_ollama(prompt):
         return None
     return response.json()['response']
 
+def save_output_json(summary, reasoning, suggested_name):
+    output_data = {
+        "summary": summary,
+        "reasoning": reasoning
+    }
+
+    file_path = f"outputs/{suggested_name}.json"
+    with open(file_path, 'w') as f:
+        json.dump(output_data, f, indent=4)
+    print(f"Output saved to {file_path}")
 
 if __name__ == "__main__":
     df = load_steel_data()
@@ -138,6 +150,11 @@ if __name__ == "__main__":
             if response:
                 print(f"Ollama Response for {date}:\n{response}")
             print("-"* 40)
+            print("would you like to save the output? (yes/no)")
+            save_choice = input().strip().lower()
+            if save_choice == 'yes':
+                suggested_name = input("Enter a name for the output file (without extension): ").strip()
+                save_output_json(summary, response, suggested_name)
     elif choice == '2':
         date = input("Enter the date (YYYY-MM-DD): ")
         summary = summarize_day(df, date)
@@ -146,6 +163,11 @@ if __name__ == "__main__":
         response = send_to_ollama(prompt)
         if response:
             print(f"Ollama Response for {date}:\n{response}")
+        print("would you like to save the output? (yes/no)")
+        save_choice = input().strip().lower()
+        if save_choice == 'yes':
+            suggested_name = input("Enter a name for the output file (without extension): ").strip()
+            save_output_json(summary, response, suggested_name)
     elif choice == '3':
         start_date = input("Enter the start date (YYYY-MM-DD): ")
         end_date = input("Enter the end date (YYYY-MM-DD): ")
@@ -155,6 +177,11 @@ if __name__ == "__main__":
         response = send_to_ollama(prompt)
         if response:
             print(f"Ollama Response for period {start_date} to {end_date}:\n{response}")
+        print("would you like to save the output? (yes/no)")
+        save_choice = input().strip().lower()
+        if save_choice == 'yes':
+            suggested_name = input("Enter a name for the output file (without extension): ").strip()
+            save_output_json(summary, response, suggested_name)
     elif choice == '4':
         month = input("Enter the month (YYYY-MM): ")
         start_date = pd.to_datetime(month + "-01")
@@ -167,7 +194,14 @@ if __name__ == "__main__":
         response = send_to_ollama(prompt)
         if response:
             print(f"Ollama Response for month {month}:\n{response}")
+        print("would you like to save the output? (yes/no)")
+        save_choice = input().strip().lower()
+        if save_choice == 'yes':
+            suggested_name = input("Enter a name for the output file (without extension): ").strip()
+            save_output_json(summary, response, suggested_name)
     
     else:
-        print("Invalid choice. Please enter 1 or 2.")
-
+        print("Invalid choice. Please enter 1 to 4.")
+    
+    
+    
