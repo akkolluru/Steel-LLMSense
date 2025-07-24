@@ -1,207 +1,142 @@
 import pandas as pd
 import json
 import os
+from datetime import date, datetime
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+import requests
 
-def load_steel_data(path="data/Steel_industry_data.csv"):
-    
-    #Load steel industry data from a CSV file.
-    
-    df =  pd.read_csv(path)
+def load_steel_data(file_path="data\Steel_industry_data.csv"):
+    """Loads and preprocesses the steel industry dataset."""
+    df = pd.read_csv(file_path)
     df['date'] = pd.to_datetime(df['date'], format="%d/%m/%Y %H:%M")
-
     return df
 
-def summarize_day(df, date):
-    day_df = df[df['date'].dt.date == pd.to_datetime(date).date()]
-    if day_df.empty:
-        return f"No data found for {date}."
-    
-    summary = f"Summary for {date}:\n"
+def generate_regression_equation(df_period: pd.DataFrame) -> str:
+    """
+    Generates a linear regression equation from the provided data period.
+    This equation serves as a dynamic summary of the data patterns.
+    """
+    if df_period.empty or len(df_period) < 2:
+        return "Not enough data to generate a model for this period."
 
-    numeric_columns = [
-        'Usage_kWh',
-        'Lagging_Current_Reactive.Power_kVarh',
-        'Leading_Current_Reactive_Power_kVarh',
-        'CO2(tCO2)',
-        'Lagging_Current_Power_Factor',
-        'Leading_Current_Power_Factor'
+    dependent_var = 'Usage_kWh'
+    independent_vars = [
+        'Lagging_Current_Reactive.Power_kVarh', 'Leading_Current_Reactive_Power_kVarh',
+        'CO2(tCO2)', 'Lagging_Current_Power_Factor', 'Leading_Current_Power_Factor',
+        'NSM', 'WeekStatus', 'Day_of_week', 'Load_Type'
     ]
 
-    for col in numeric_columns:
-        mean_val = day_df[col].mean()
-        max_val = day_df[col].max()
-        min_val = day_df[col].min()
-        summary += (
-            f"- {col}: Avg = {mean_val:.2f}, Max = {max_val:.2f}, Min = {min_val:.2f}\n"
-        )
+    X = df_period[independent_vars]
+    y = df_period[dependent_var]
 
-    load_type_counts = day_df['Load_Type'].value_counts(normalize=True) * 100
-    summary += "\nLoad Type Distribution:\n"
+    categorical_features = ['WeekStatus', 'Day_of_week', 'Load_Type']
+    numerical_features = [col for col in independent_vars if col not in categorical_features]
 
-    for load_type, percentage in load_type_counts.items():
-        summary += f"- {load_type}: {percentage:.2f}%\n"
-
-    return summary
-
-def summarize_all_days(df):
-    all_summaries = {}
-    unique_dates = df['date'].dt.date.unique()
-    for date in unique_dates:
-        summary = summarize_day(df, date)
-        all_summaries[str(date)] = summary
-    return all_summaries
-
-def summarize_period(df, start_date, end_date, label="period"):
-    period_df = df[(df['date'] >= pd.to_datetime(start_date)) & (df['date'] <= pd.to_datetime(end_date))]
-    if period_df.empty:
-        return f"No data found for the period from {start_date} to {end_date}."
-    summary = f"Summary from {start_date} to {end_date}:\n"
-    numeric_columns = [
-        'Usage_kWh',
-        'Lagging_Current_Reactive.Power_kVarh',
-        'Leading_Current_Reactive_Power_kVarh',
-        'CO2(tCO2)',
-        'Lagging_Current_Power_Factor',
-        'Leading_Current_Power_Factor'
-    ]
-    for col in numeric_columns:
-        summary += (
-            f"- {col}: Avg = {period_df[col].mean():.2f}, "
-            f"Max = {period_df[col].max():.2f}, "
-            f"Min = {period_df[col].min():.2f}\n"
-        )
-    load_type_counts = period_df['Load_Type'].value_counts(normalize=True) * 100
-    summary += "\nLoad Type Distribution:\n"
-    for load_type, percentage in load_type_counts.items():
-        summary += f"- {load_type}: {percentage:.2f}%\n"
-    return summary
-
-import requests
-def build_prompt(summary):
-    objective = (
-        "You are an expert industrial process analyst. "
-        "Your task is to analyze steel plant daily sensor summaries to detect anomalies, "
-        "predict potential maintenance needs, and suggest energy optimization."
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', 'passthrough', numerical_features),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ],
+        remainder='passthrough'
     )
-    context = (
-        "The steel plant data includes:\n"
-        "- Usage_kWh: Energy usage\n"
-        "- Lagging_Current_Reactive.Power_kVarh: Reactive power\n"
-        "- Leading_Current_Reactive_Power_kVarh: Reactive power\n"
-        "- CO2(tCO2): Emissions\n"
-        "- Power Factors: Operational efficiency\n"
-        "- Load Type distribution: Indicates operational states\n"
-        "Analyze based on your domain knowledge."
-    )
-    format_instructions = (
-        "Reply strictly in the following JSON format:\n"
-        "{\n"
-        "  \"maintenance_needed\": \"Yes/No\",\n"
-        "  \"reasoning\": \"Your concise reasoning here.\",\n"
-        "  \"energy_optimization_suggestions\": \"Your suggestions here.\"\n"
-        "}"
-    )
-    prompt = (
-        f"OBJECTIVE:\n{objective}\n\n"
-        f"CONTEXT:\n{context}\n\n"
-        f"DATA:\n{summary}\n\n"
-        f"FORMAT:\n{format_instructions}"
-    )
+
+    pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('regressor', LinearRegression())
+    ])
+
+    pipeline.fit(X, y)
+
+    intercept = pipeline.named_steps['regressor'].intercept_
+    coefficients = pipeline.named_steps['regressor'].coef_
+    feature_names = (numerical_features +
+                   list(pipeline.named_steps['preprocessor']
+                        .named_transformers_['cat']
+                        .get_feature_names_out(categorical_features)))
+
+    equation = f"{dependent_var} = {intercept:.4f}"
+    for coef, name in zip(coefficients, feature_names):
+        sign = "+" if coef >= 0 else "-"
+        equation += f" {sign} {abs(coef):.4f} * {name}"
+
+    return equation
+
+def summarize_day(df: pd.DataFrame, day: date) -> str:
+    """Summarizes a single day by generating a regression equation."""
+    day_dt = pd.to_datetime(day)
+    df_day = df[df['date'].dt.date == day_dt.date()]
+    return generate_regression_equation(df_day)
+
+def summarize_period(df: pd.DataFrame, start: date, end: date) -> str:
+    """Summarizes a date range by generating a regression equation."""
+    start_dt = pd.to_datetime(start)
+    end_dt = pd.to_datetime(end)
+    df_period = df[(df['date'] >= start_dt) & (df['date'] <= end_dt)]
+    return generate_regression_equation(df_period)
+
+def build_prompt(equation: str) -> str:
+    """Builds the prompt for the LLM to interpret the equation."""
+    prompt = f"""
+    You are an expert industrial data analyst. Your task is to interpret a regression model and provide a simple, actionable summary for a plant manager.
+
+    Here is the regression equation summarizing the plant's recent performance:
+    ```
+    {equation}
+    ```
+
+    Based on this model, please provide the following in a strict JSON format:
+
+    1.  **"maintenance_needed"**: A boolean (true/false). Set to `true` if the model indicates any anomalies or inefficiencies (e.g., high impact from lagging reactive power, poor power factor correlation) that suggest equipment needs inspection.
+    2.  **"reasoning"**: A concise, layman's terms explanation of the key factors driving energy consumption (`Usage_kWh`) according to the model. Explain what the most impactful variables are.
+    3.  **"energy_optimization_suggestions"**: Provide 2-3 bullet-pointed, practical suggestions for how the plant can optimize its energy usage based on the relationships in the equation.
+
+    Example Output Format:
+    {{
+      "maintenance_needed": true,
+      "reasoning": "Energy consumption is heavily driven by reactive power, indicating potential inefficiencies in motors or transformers. The type of load also has a significant impact, with heavy loads consuming proportionally more power.",
+      "energy_optimization_suggestions": [
+        "Investigate equipment with high lagging reactive power to improve power factor.",
+        "Shift non-essential heavy loads to off-peak hours if possible.",
+        "Review the efficiency of machinery used during 'Maximum_Load' periods."
+      ]
+    }}
+    """
     return prompt
 
-def send_to_ollama(prompt):
-    url="http://localhost:11434/api/generate"
-    response = requests.post(
-        url,
-        json={"model": "mistral", "prompt": prompt, "stream": False}
-    )
-    if response.status_code != 200:
-        print("Error communicating with Ollama:", response.text)
-        return None
-    return response.json()['response']
-
-def save_output_json(summary, reasoning, suggested_name):
-    output_data = {
-        "summary": summary,
-        "reasoning": reasoning
+def send_to_ollama(prompt_text: str, model: str = "mistral", temperature: float = 0.1) -> str:
+    """Sends the prompt to the Ollama API and returns the response."""
+    url = "http://localhost:11434/api/generate"
+    payload = {
+        "model": model,
+        "prompt": prompt_text,
+        "stream": False,
+        "options": {"temperature": temperature}
     }
+    try:
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        return response.json().get("response", "").strip()
+    except requests.exceptions.RequestException as e:
+        return f'{{"error": "Failed to connect to Ollama API: {e}"}}'
 
-    file_path = f"outputs/{suggested_name}.json"
+def save_output_json(summary_equation: str, llm_reasoning: str, filename: str):
+    """Saves the summary and LLM reasoning to a JSON file."""
+    output_folder = "outputs/"
+    os.makedirs(output_folder, exist_ok=True)
+
+    try:
+        # The LLM reasoning is already expected to be a JSON string
+        reasoning_json = json.loads(llm_reasoning)
+    except json.JSONDecodeError:
+        reasoning_json = {"raw_output": llm_reasoning}
+
+    output_data = {
+        "summary_equation": summary_equation,
+        "reasoning": reasoning_json
+    }
+    file_path = os.path.join(output_folder, f"{filename}.json")
     with open(file_path, 'w') as f:
         json.dump(output_data, f, indent=4)
-    print(f"Output saved to {file_path}")
-
-if __name__ == "__main__":
-    df = load_steel_data()
-
-    print("Steel LLMSense Summary Generator")
-    print("1. Summarize all days")
-    print("2. Summarize a specific day")
-    print("3. Summarize a period")
-    print("4. Summarize a mothn")
-    choice = input("Enter your choice (1, 2, 3, or 4): ")
-
-    if choice == '1':
-        summaries = summarize_all_days(df)
-        for date, summary in summaries.items():
-            print(f"\n{date} Summary:\n{summary}")
-            prompt = build_prompt(summary)
-            response = send_to_ollama(prompt)
-            if response:
-                print(f"Ollama Response for {date}:\n{response}")
-            print("-"* 40)
-            print("would you like to save the output? (yes/no)")
-            save_choice = input().strip().lower()
-            if save_choice == 'yes':
-                suggested_name = input("Enter a name for the output file (without extension): ").strip()
-                save_output_json(summary, response, suggested_name)
-    elif choice == '2':
-        date = input("Enter the date (YYYY-MM-DD): ")
-        summary = summarize_day(df, date)
-        print(summary)
-        prompt = build_prompt(summary)
-        response = send_to_ollama(prompt)
-        if response:
-            print(f"Ollama Response for {date}:\n{response}")
-        print("would you like to save the output? (yes/no)")
-        save_choice = input().strip().lower()
-        if save_choice == 'yes':
-            suggested_name = input("Enter a name for the output file (without extension): ").strip()
-            save_output_json(summary, response, suggested_name)
-    elif choice == '3':
-        start_date = input("Enter the start date (YYYY-MM-DD): ")
-        end_date = input("Enter the end date (YYYY-MM-DD): ")
-        summary = summarize_period(df, start_date, end_date)
-        print(summary)
-        prompt = build_prompt(summary)
-        response = send_to_ollama(prompt)
-        if response:
-            print(f"Ollama Response for period {start_date} to {end_date}:\n{response}")
-        print("would you like to save the output? (yes/no)")
-        save_choice = input().strip().lower()
-        if save_choice == 'yes':
-            suggested_name = input("Enter a name for the output file (without extension): ").strip()
-            save_output_json(summary, response, suggested_name)
-    elif choice == '4':
-        month = input("Enter the month (YYYY-MM): ")
-        start_date = pd.to_datetime(month + "-01")
-        next_month = start_date + pd.DateOffset(months=1)
-        end_date = next_month.strftime("%Y-%m-%d")
-        start_date = start_date.strftime("%Y-%m-%d")
-        summary = summarize_period(df, start_date, end_date, label="month")
-        print(summary)
-        prompt = build_prompt(summary)
-        response = send_to_ollama(prompt)
-        if response:
-            print(f"Ollama Response for month {month}:\n{response}")
-        print("would you like to save the output? (yes/no)")
-        save_choice = input().strip().lower()
-        if save_choice == 'yes':
-            suggested_name = input("Enter a name for the output file (without extension): ").strip()
-            save_output_json(summary, response, suggested_name)
-    
-    else:
-        print("Invalid choice. Please enter 1 to 4.")
-    
-    
-    

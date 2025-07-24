@@ -1,0 +1,14 @@
+artifact_uri: file:///G:/Coding/Steel LLMSense/mlruns/924066685828103357/7c68558bfdee40c3b42530d5eed55a56/artifacts
+end_time: 1753353547026
+entry_point_name: ''
+experiment_id: '924066685828103357'
+lifecycle_stage: active
+run_id: 7c68558bfdee40c3b42530d5eed55a56
+run_name: feb_summary_Reflection
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1753353546941
+status: 3
+tags: []
+user_id: arunk

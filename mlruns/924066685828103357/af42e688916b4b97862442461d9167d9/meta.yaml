@@ -1,0 +1,14 @@
+artifact_uri: file:///G:/Coding/Steel LLMSense/mlruns/924066685828103357/af42e688916b4b97862442461d9167d9/artifacts
+end_time: 1753032134498
+entry_point_name: ''
+experiment_id: '924066685828103357'
+lifecycle_stage: active
+run_id: af42e688916b4b97862442461d9167d9
+run_name: nov30_IterativeDebate
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1753032134441
+status: 3
+tags: []
+user_id: arunk
